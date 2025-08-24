@@ -1,0 +1,6 @@
+train: E:\pnid\Automated-PnID-Symbol-Detection-and-Labelling-main\New folder\PID_Symbol_Detection-main\PID_Symbol_Detection-main\data\processed\stage_1\yolo_class_agnostic\images\train
+val: E:\pnid\Automated-PnID-Symbol-Detection-and-Labelling-main\New folder\PID_Symbol_Detection-main\PID_Symbol_Detection-main\data\processed\stage_1\yolo_class_agnostic\images\val
+test: E:\pnid\Automated-PnID-Symbol-Detection-and-Labelling-main\New folder\PID_Symbol_Detection-main\PID_Symbol_Detection-main\data\processed\stage_1\yolo_class_agnostic\images\test
+nc: 1
+names:
+- Symbol

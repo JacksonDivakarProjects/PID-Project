@@ -1,0 +1,85 @@
+# P&ID Symbol Detection Pipeline Configuration
+
+# Data paths
+data:
+  root_dir: "data"
+  raw:
+    raw_images_dir: "raw/images"
+    raw_class_aware_labels_dir: "raw/labels_class_aware"
+    raw_class_agnostic_labels_dir: "raw/labels_class_agnostic"
+  processed:
+    stage_1:
+      class_agnostic_patches_dir: "processed/stage_1/patches_class_agnostic"
+      class_aware_patches_dir: "processed/stage_1/patches_class_aware"
+      class_agnostic_yolo_train_dir: "processed/stage_1/yolo_class_agnostic"
+      class_aware_yolo_train_dir: "processed/stage_1/yolo_class_aware"
+
+    stage_2:
+      symbol_crops_dir: "processed/stage_2/crops"
+      few_shot_dir: "processed/stage_2/few_shot"
+  results:
+    stage_1:
+      class_agnostic_results_dir: "results/stage_1/class_agnostic"
+      class_aware_results_dir: "results/stage_1/class_aware"
+    stage_2:
+      few_shot_results_dir: "results/stage_2/few_shot"
+
+# Model paths
+models:
+  root_dir: "models"
+  base_yolo_path: "base_yolo_models/yolov8n.pt"
+  stage1_class_agnostic_weights_dir: "stage1/class_agnostic"
+  stage1_class_aware_weights_dir: "stage1/class_aware"
+  stage2_few_shot_weights_dir: "stage2/few_shot"
+
+# Symbol detection configuration
+symbol_detection:
+  patch_size: [1024, 1024]
+  patch_overlap: [50, 50]
+  min_visibility: 0.3
+  num_classes_agnostic: 1
+  num_classes_aware: 32
+  confidence_threshold: 0.25
+  iou_threshold: 0.45
+  class_agnostic_class_names: ["Symbol"]
+  class_aware_class_names: ["0", "1", "2", "3", "4", "5", "6", "7", "8", "9", "10",
+                             "11", "12", "13", "14", "15", "16", "17", "18",
+                             "19", "20", "21", "22", "23", "24", "25", "26",
+                             "27", "28", "29", "30", "31"]
+
+
+# Yolo Training configuration
+training:
+  train_val_test_split: [0.7, 0.2, 0.1]
+  batch_size: 4
+  epochs: 5
+  learning_rate: 0.001
+  image_size: [1024, 1024]
+
+
+# Few-shot training configuration
+few_shot:
+  support_set_size: 5
+  embedding_size: 64
+  num_episodes: 6400 # triplets
+  train_val_split: [0.8, 0.2]
+  epochs: 20
+  batch_size: 32
+  learning_rate: 0.0005
+  margin: 1.0
+
+
+
+# Stage 1 Evaluation configuration
+stage1_inference:
+  slice_height: 1024
+  slice_width: 1024
+  overlap_height_ratio: 0.1
+  overlap_width_ratio: 0.1
+  conf: 0.5
+  save_txt: True
+  save_conf: False
+ 
+# Stage 2 Evaluation configuration
+stage2_inference:
+  distance_metric: "euclidean"
