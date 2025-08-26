@@ -12,15 +12,36 @@ def encode_image_to_base64(image_path: str) -> str:
     except Exception as e:
         raise HTTPException(status_code=400, detail=f"Error encoding image: {str(e)}")
 
-def extract_text_from_image(image_base64: str, mime_type: str = "image/jpeg") -> str:
+def extract_text_from_image(image_base64: str, mime_type: str = "image/jpeg",component_name: str = "not available") -> str:
     """Extract text from base64 encoded image using OpenAI API"""
     try:
+        print(f"""
+              You are an expert P&ID reader.
+                Input: image + component name.
+                Output every visible label/ID on the drawing, one per line, exactly as they appear (including hyphens, spaces, suffixes).
+                Do not add extra text or explanation.
+              componendt name: {component_name}
+                """)
         response = client.chat.completions.create(
     messages=[
         {
             "role": "user",
             "content": [
-                {"type": "text", "text": "Extract all text from this image. Return only the extracted text without any additional formatting or explanation:"},
+                {"type": "text", "text": f"""
+                 You are an expert in reading P&ID diagrams.  
+Input: a cropped image of a single P&ID symbol.  
+
+Your task:  
+- Extract ONLY the tag/label that is written inside or immediately next to the given symbol.  
+- The tag is typically a short code like "OP-11854", "XV-203", "LT-101" etc.  
+- Ignore all other surrounding text, notes, descriptions, line numbers, or extra commentary.  
+- If no tag/label is visible, return exactly: Nothing  
+
+Output format:  
+Return only the exact tag/label text (e.g., OP-11854).  
+Return nothing else — no explanations, no steps, no extra text.
+
+              componendt name: {component_name}"""},
                 {
                     "type": "image_url",
                     "image_url": {

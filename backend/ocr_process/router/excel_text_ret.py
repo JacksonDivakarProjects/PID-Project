@@ -251,6 +251,7 @@ def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image
             y = float(row['y'])
             width = float(row['width'])
             height = float(row['height'])
+            component_name = str(row['Component Name'])
             
             # Skip if dimensions are too small (likely noise)
             if width < 5 or height < 5:
@@ -287,7 +288,7 @@ def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image
                 # Use existing functions to process the cropped image
                 mime_type = 'image/png'
                 image_base64 = encode_image_to_base64(temp_crop_path)
-                extracted_text = extract_text_from_image(image_base64, mime_type)
+                extracted_text = extract_text_from_image(image_base64, mime_type,component_name)
                 
                 # Clean extracted text
                 extracted_text = extracted_text.strip()
