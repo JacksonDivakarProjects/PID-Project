@@ -1,6 +1,7 @@
 from dotenv import load_dotenv
 import os
-from openai import OpenAI
+# from openai import OpenAI
+from groq import Groq
 
 load_dotenv()
 
@@ -11,7 +12,4 @@ MODEL = os.environ['OCR_MODEL']
 if not api_key:
     raise ValueError("Please set OPENROUTER_API_KEY in your .env file.")
 
-client = OpenAI(
-    api_key=api_key,
-    base_url=base_url
-   )
+client = Groq(api_key="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")

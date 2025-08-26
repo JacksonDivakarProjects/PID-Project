@@ -16,22 +16,22 @@ def extract_text_from_image(image_base64: str, mime_type: str = "image/jpeg") ->
     """Extract text from base64 encoded image using OpenAI API"""
     try:
         response = client.chat.completions.create(
-            model=MODEL,
-            messages=[
+    messages=[
+        {
+            "role": "user",
+            "content": [
+                {"type": "text", "text": "Extract all text from this image. Return only the extracted text without any additional formatting or explanation:"},
                 {
-                    "role": "user",
-                    "content": [
-                        {"type": "text", "text": "Extract all text from this image. Return only the extracted text without any additional formatting or explanation:"},
-                        {
-                            "type": "image_url",
-                            "image_url": {
-                                "url": f"data:{mime_type};base64,{image_base64}"
-                            }
-                        }
-                    ],
-                }
-            ]
-        )
+                    "type": "image_url",
+                    "image_url": {
+                        "url": f"data:image/jpeg;base64,{image_base64}",
+                    },
+                },
+            ],
+        }
+    ],
+    model="meta-llama/llama-4-scout-17b-16e-instruct",
+)
         return response.choices[0].message.content
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error extracting text: {str(e)}")
