@@ -1,0 +1,5 @@
+openai==1.98.0
+python-dotenv==1.0.1
+sahi==0.11.33
+torchvision==0.23.0
+inference-sdk==0.53.0
