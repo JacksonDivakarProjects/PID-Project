@@ -13,7 +13,7 @@ from backend.ocr_process.services.pnid_img_text_process import (
     get_mime_type
 )
 
-from backend.config.settings import *
+from backend.config.settings import MODEL
 
 
 # Initialize router

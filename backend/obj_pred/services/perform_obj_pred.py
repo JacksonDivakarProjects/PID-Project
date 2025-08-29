@@ -29,8 +29,8 @@ async def perform_inference_and_nms(image_np: np.ndarray):
         result = CLIENT.infer(img_base64, model_id="project-pid-f2quh/1")
 
         for prediction in result['predictions']:
-            prediction['x'] += x_start
-            prediction['y'] += y_start
+            prediction['x'] += y_start
+            prediction['y'] += x_start
             all_predictions.append(prediction)
 
     boxes, scores, original_indices = [], [], []
@@ -45,5 +45,3 @@ async def perform_inference_and_nms(image_np: np.ndarray):
         keep_indices_tensor = nms(boxes_tensor, scores_tensor, iou_threshold=0.45)
         return [all_predictions[original_indices[i]] for i in keep_indices_tensor]
     return []
-
-# --- 3. API ENDPOINTS ---

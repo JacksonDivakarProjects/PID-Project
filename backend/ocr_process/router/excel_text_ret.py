@@ -1,5 +1,4 @@
 from fastapi import APIRouter, UploadFile, File, HTTPException
-from fastapi.responses import StreamingResponse
 import pandas as pd
 from PIL import Image
 import io
@@ -7,9 +6,8 @@ import tempfile
 import os
 from pathlib import Path
 from typing import Dict, Any
-import zipfile
 from datetime import datetime
-import uuid
+import base64
 
 router = APIRouter(prefix="/excel_ocr", tags=["EXCEL_OCR"])
 
@@ -19,23 +17,6 @@ from backend.ocr_process.services.pnid_img_text_process import (
     extract_text_from_image,
     get_mime_type
 )
-
-def create_crops_directory(base_name: str) -> str:
-    """
-    Create a directory for storing cropped images
-    
-    Args:
-        base_name: Base name for the directory
-        
-    Returns:
-        Path to the created directory
-    """
-    timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-    unique_id = str(uuid.uuid4())[:8]
-    crops_dir = f"cropped_images/{base_name}_{timestamp}_{unique_id}"
-    
-    os.makedirs(crops_dir, exist_ok=True)
-    return crops_dir
 
 def calculate_intelligent_padding(width: float, height: float, image_width: int, image_height: int) -> Dict[str, float]:
     """
@@ -184,61 +165,22 @@ def crop_image_region_with_intelligent_padding(image: Image.Image, x: float, y: 
     
     return cropped_image, crop_info
 
-# Keep the old function for backward compatibility
-def crop_image_region(image: Image.Image, x: float, y: float, width: float, height: float) -> Image.Image:
-    """
-    Crop a specific region from an image based on bounding box coordinates (backward compatibility)
-    """
-    cropped_image, _ = crop_image_region_with_intelligent_padding(image, x, y, width, height, False)
-    return cropped_image
-
-def save_cropped_image(cropped_image: Image.Image, crops_dir: str, row_index: int, 
-                      x: float, y: float, width: float, height: float, 
-                      crop_info: Dict[str, Any] = None) -> str:
-    """
-    Save cropped image with descriptive filename including expansion info
-    
-    Args:
-        cropped_image: PIL Image object to save
-        crops_dir: Directory to save the image
-        row_index: Index of the row being processed
-        x, y, width, height: Original bounding box coordinates
-        crop_info: Information about the crop expansion
-        
-    Returns:
-        Filename of the saved image
-    """
-    if crop_info and 'expansion_factor' in crop_info:
-        exp_w = crop_info['expansion_factor']['width']
-        exp_h = crop_info['expansion_factor']['height']
-        filename = f"crop_{row_index:04d}_x{int(x)}_y{int(y)}_w{int(width)}_h{int(height)}_exp{exp_w:.1f}x{exp_h:.1f}.png"
-    else:
-        filename = f"crop_{row_index:04d}_x{int(x)}_y{int(y)}_w{int(width)}_h{int(height)}.png"
-    
-    filepath = os.path.join(crops_dir, filename)
-    cropped_image.save(filepath, format='PNG')
-    return filename
-
-def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image, 
-                                   crops_dir: str, save_crops: bool = True,
-                                   intelligent_padding: bool = True) -> pd.DataFrame:
+def process_excel_regions_with_ocr(df: pd.DataFrame, source_image: Image.Image, 
+                                  intelligent_padding: bool = True) -> pd.DataFrame:
     """
     Process Excel DataFrame with bounding boxes and extract text from each region
     
     Args:
         df: DataFrame with columns x, y, width, height
         source_image: PIL Image object
-        crops_dir: Directory to save cropped images
-        save_crops: Whether to save cropped images for verification
         intelligent_padding: Whether to apply intelligent padding for label capture
         
     Returns:
-        Updated DataFrame with extracted_text, ocr_status, crop_filename, and crop_info columns
+        Updated DataFrame with extracted_text, ocr_status, expansion_factor columns
     """
     # Initialize new columns
     df['extracted_text'] = ''
     df['ocr_status'] = ''
-    df['crop_filename'] = ''
     df['expansion_factor_w'] = 0.0
     df['expansion_factor_h'] = 0.0
     df['padding_applied'] = ''
@@ -251,13 +193,12 @@ def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image
             y = float(row['y'])
             width = float(row['width'])
             height = float(row['height'])
-            component_name = str(row['Component Name'])
+            component_name = str(row.get('Component Name', ''))
             
             # Skip if dimensions are too small (likely noise)
             if width < 5 or height < 5:
                 df.at[idx, 'extracted_text'] = 'REGION_TOO_SMALL'
                 df.at[idx, 'ocr_status'] = 'SKIPPED'
-                df.at[idx, 'crop_filename'] = 'NOT_CREATED'
                 continue
             
             # Crop image region with intelligent padding
@@ -273,12 +214,6 @@ def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image
                                            f"L:{int(crop_info['padding_applied']['left'])}, " \
                                            f"R:{int(crop_info['padding_applied']['right'])}"
             
-            # Save cropped image for verification if enabled
-            crop_filename = 'NOT_SAVED'
-            if save_crops:
-                crop_filename = save_cropped_image(cropped_image, crops_dir, idx, x, y, width, height, crop_info)
-                df.at[idx, 'crop_filename'] = crop_filename
-            
             # Save cropped image to temporary file for OCR processing
             with tempfile.NamedTemporaryFile(delete=False, suffix='.png') as temp_crop:
                 cropped_image.save(temp_crop.name, format='PNG')
@@ -288,7 +223,7 @@ def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image
                 # Use existing functions to process the cropped image
                 mime_type = 'image/png'
                 image_base64 = encode_image_to_base64(temp_crop_path)
-                extracted_text = extract_text_from_image(image_base64, mime_type,component_name)
+                extracted_text = extract_text_from_image(image_base64, mime_type, component_name)
                 
                 # Clean extracted text
                 extracted_text = extracted_text.strip()
@@ -306,89 +241,45 @@ def process_excel_regions_with_crops(df: pd.DataFrame, source_image: Image.Image
         except Exception as e:
             df.at[idx, 'extracted_text'] = f'ERROR: {str(e)[:100]}'  # Limit error message length
             df.at[idx, 'ocr_status'] = 'FAILED'
-            df.at[idx, 'crop_filename'] = 'ERROR_OCCURRED'
     
     return df
 
-def create_zip_with_results(df: pd.DataFrame, crops_dir: str, excel_filename: str) -> io.BytesIO:
+def excel_to_base64(df: pd.DataFrame, sheet_name: str = 'OCR_Results') -> str:
     """
-    Create a ZIP file containing the Excel results and cropped images
+    Convert DataFrame to Excel format and encode as base64
     
     Args:
-        df: Processed DataFrame
-        crops_dir: Directory containing cropped images
-        excel_filename: Name for the Excel file
+        df: DataFrame to convert
+        sheet_name: Name of the Excel sheet
         
     Returns:
-        BytesIO object containing the ZIP file
+        Base64 encoded Excel file
     """
-    zip_buffer = io.BytesIO()
+    excel_buffer = io.BytesIO()
+    with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
+        df.to_excel(writer, sheet_name=sheet_name, index=False)
     
-    with zipfile.ZipFile(zip_buffer, 'w', zipfile.ZIP_DEFLATED) as zip_file:
-        # Add Excel file
-        excel_buffer = io.BytesIO()
-        with pd.ExcelWriter(excel_buffer, engine='openpyxl') as writer:
-            df.to_excel(writer, sheet_name='OCR_Results', index=False)
-        
-        excel_buffer.seek(0)
-        zip_file.writestr(excel_filename, excel_buffer.getvalue())
-        
-        # Add cropped images
-        if os.path.exists(crops_dir):
-            for filename in os.listdir(crops_dir):
-                if filename.endswith('.png'):
-                    file_path = os.path.join(crops_dir, filename)
-                    zip_file.write(file_path, f"cropped_images/{filename}")
-        
-        # Add a README file with information
-        readme_content = f"""OCR Processing Results
-========================
-
-This ZIP file contains:
-1. {excel_filename} - Excel file with OCR results
-2. cropped_images/ - Directory with all cropped image regions
-
-Excel File Columns:
-- Original columns from your input file
-- extracted_text: Text extracted from each region using OCR
-- ocr_status: Status of OCR processing (SUCCESS, FAILED, SKIPPED)
-- crop_filename: Name of the corresponding cropped image file
-
-Cropped Image Naming Convention:
-crop_XXXX_xNNN_yNNN_wNNN_hNNN.png
-- XXXX: Row index (0-padded)
-- xNNN, yNNN: Center coordinates
-- wNNN, hNNN: Width and height
-
-Processing Date: {datetime.now().strftime("%Y-%m-%d %H:%M:%S")}
-Total Regions Processed: {len(df)}
-Successful OCR: {len(df[df['ocr_status'] == 'SUCCESS'])}
-Failed OCR: {len(df[df['ocr_status'] == 'FAILED'])}
-Skipped (too small): {len(df[df['ocr_status'] == 'SKIPPED'])}
-"""
-        zip_file.writestr("README.txt", readme_content)
-    
-    zip_buffer.seek(0)
-    return zip_buffer
+    excel_buffer.seek(0)
+    excel_base64 = base64.b64encode(excel_buffer.getvalue()).decode('utf-8')
+    return excel_base64
 
 @router.post("/process-excel-with-image")
 async def process_excel_with_image(
     excel_file: UploadFile = File(..., description="Excel file with bounding box data (columns: x, y, width, height)"),
     image_file: UploadFile = File(..., description="Source image for OCR processing"),
-    save_crops: bool = True,
     intelligent_padding: bool = True
 ):
     """
     Process Excel file with bounding boxes and extract text from corresponding image regions
+    Returns Excel file as base64 encoded string
     
     Args:
         excel_file: Excel file with columns: x, y, width, height (and optionally others)
         image_file: Source image file (jpg, jpeg, png, gif, bmp, webp)
-        save_crops: Whether to save cropped images for verification (default: True)
         intelligent_padding: Whether to apply intelligent padding for label capture (default: True)
         
     Returns:
-        ZIP file containing Excel results and cropped images (if save_crops=True)
+        JSON response with base64 encoded Excel file
     """
     
     # Validate Excel file type
@@ -410,7 +301,6 @@ async def process_excel_with_image(
     
     temp_excel_path = None
     temp_image_path = None
-    crops_dir = None
     
     try:
         # Save uploaded Excel file temporarily
@@ -446,79 +336,52 @@ async def process_excel_with_image(
         except Exception as e:
             raise HTTPException(status_code=400, detail=f"Error loading image: {str(e)}")
         
-        # Create directory for cropped images if saving is enabled
-        if save_crops:
-            base_name = Path(excel_file.filename).stem
-            crops_dir = create_crops_directory(base_name)
-        
         # Process Excel data with OCR
-        updated_df = process_excel_regions_with_crops(df, source_image, crops_dir or "", 
-                                                     save_crops, intelligent_padding)
+        updated_df = process_excel_regions_with_ocr(df, source_image, intelligent_padding)
         
         # Generate output filename
         original_name = Path(excel_file.filename).stem
         padding_suffix = "_smart_padded" if intelligent_padding else "_exact"
         excel_filename = f"{original_name}{padding_suffix}_ocr_results.xlsx"
         
-        if save_crops:
-            # Create ZIP file with Excel results and cropped images
-            zip_filename = f"{original_name}{padding_suffix}_ocr_results_with_crops.zip"
-            zip_buffer = create_zip_with_results(updated_df, crops_dir, excel_filename)
-            
-            # Clean up temporary files
-            if temp_excel_path and os.path.exists(temp_excel_path):
-                os.unlink(temp_excel_path)
-            if temp_image_path and os.path.exists(temp_image_path):
-                os.unlink(temp_image_path)
-            
-            # Return ZIP file
-            return StreamingResponse(
-                io.BytesIO(zip_buffer.getvalue()),
-                media_type="application/zip",
-                headers={"Content-Disposition": f"attachment; filename={zip_filename}"}
-            )
-        else:
-            # Return only Excel file
-            output_buffer = io.BytesIO()
-            with pd.ExcelWriter(output_buffer, engine='openpyxl') as writer:
-                updated_df.to_excel(writer, sheet_name='OCR_Results', index=False)
-            
-            output_buffer.seek(0)
-            
-            # Clean up temporary files
-            if temp_excel_path and os.path.exists(temp_excel_path):
-                os.unlink(temp_excel_path)
-            if temp_image_path and os.path.exists(temp_image_path):
-                os.unlink(temp_image_path)
-            
-            return StreamingResponse(
-                io.BytesIO(output_buffer.getvalue()),
-                media_type="application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-                headers={"Content-Disposition": f"attachment; filename={excel_filename}"}
-            )
+        # Convert to base64
+        excel_base64 = excel_to_base64(updated_df)
+        
+        # Prepare response data
+        response_data = {
+            "status": "success",
+            "processed_count": len(updated_df),
+            "success_count": len(updated_df[updated_df['ocr_status'] == 'SUCCESS']),
+            "failed_count": len(updated_df[updated_df['ocr_status'] == 'FAILED']),
+            "skipped_count": len(updated_df[updated_df['ocr_status'] == 'SKIPPED']),
+            "filename": excel_filename,
+            "file_base64": excel_base64,
+            "mime_type": "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+            "processing_info": {
+                "intelligent_padding": intelligent_padding,
+                "original_filename": excel_file.filename,
+                "image_filename": image_file.filename,
+                "processing_timestamp": datetime.now().isoformat()
+            }
+        }
+        
+        # Clean up temporary files
+        if temp_excel_path and os.path.exists(temp_excel_path):
+            os.unlink(temp_excel_path)
+        if temp_image_path and os.path.exists(temp_image_path):
+            os.unlink(temp_image_path)
+        
+        return response_data
         
     except HTTPException:
         # Re-raise HTTP exceptions
         raise
     except Exception as e:
-        # Clean up temporary files and crops directory on error
+        # Clean up temporary files on error
         if temp_excel_path and os.path.exists(temp_excel_path):
             os.unlink(temp_excel_path)
         if temp_image_path and os.path.exists(temp_image_path):
             os.unlink(temp_image_path)
-        if crops_dir and os.path.exists(crops_dir):
-            import shutil
-            shutil.rmtree(crops_dir, ignore_errors=True)
-        
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error during processing: {str(e)}"
-        )(crops_dir, ignore_errors=True)
-        
-        raise HTTPException(
-            status_code=500,
-            detail=f"Internal server error during processing: {str(e)}"
-        )(crops_dir, ignore_errors=True)
         
         raise HTTPException(
             status_code=500,
@@ -540,12 +403,25 @@ async def get_excel_processing_info() -> Dict[str, Any]:
         },
         "output_columns": [
             "extracted_text", 
-            "ocr_status", 
-            "crop_filename",
+            "ocr_status",
             "expansion_factor_w",
             "expansion_factor_h", 
             "padding_applied"
         ],
+        "response_format": {
+            "type": "base64",
+            "description": "Returns Excel file as base64 encoded string in JSON response",
+            "fields": {
+                "status": "Processing status",
+                "filename": "Suggested filename",
+                "file_base64": "Base64 encoded Excel file content",
+                "mime_type": "MIME type for the Excel file",
+                "processed_count": "Total number of regions processed",
+                "success_count": "Number of successful OCR extractions",
+                "failed_count": "Number of failed OCR extractions",
+                "skipped_count": "Number of skipped regions"
+            }
+        },
         "intelligent_padding_features": {
             "size_based_adjustment": "Smaller components get more padding",
             "aspect_ratio_consideration": "Wide/tall components get strategic padding",
@@ -562,13 +438,11 @@ async def get_excel_processing_info() -> Dict[str, Any]:
             "base_padding": "80% of component size as starting point"
         },
         "parameters": {
-            "save_crops": "Boolean - Save cropped images for verification",
             "intelligent_padding": "Boolean - Apply smart padding for label capture"
         },
         "usage_examples": {
-            "default": "Both save_crops=true and intelligent_padding=true",
-            "exact_crops": "intelligent_padding=false for exact bounding box crops",
-            "excel_only": "save_crops=false to get only Excel results"
+            "default": "intelligent_padding=true for smart padded crops",
+            "exact_crops": "intelligent_padding=false for exact bounding box crops"
         }
     }
 
@@ -589,7 +463,7 @@ async def test_padding_preview(
     Returns:
         JSON with padding calculation details for sample components
     """
-    # Validation and file loading (similar to main function)
+    # Validation and file loading
     if not excel_file.filename.lower().endswith(('.xlsx', '.xls')):
         raise HTTPException(status_code=400, detail="Excel file must be .xlsx or .xls format")
     

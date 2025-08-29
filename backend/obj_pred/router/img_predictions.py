@@ -70,6 +70,7 @@ async def predict_upload_and_get_json(file: UploadFile = File(...)):
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during prediction: {e}")
 
+
 @router.post("/predict-json/", response_model=Base64Response)
 async def predict_base64_and_get_json(request: Base64Request):
     """
@@ -115,6 +116,7 @@ async def predict_base64_and_get_json(request: Base64Request):
         )
     except Exception as e:
         raise HTTPException(status_code=500, detail=f"Error during prediction: {e}")
+
 
 @router.get("/")
 def read_root():
