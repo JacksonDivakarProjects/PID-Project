@@ -6,7 +6,7 @@ import cv2
 import numpy as np
 import pandas as pd
 
-from backend.config.settings import CLIENT
+from config.settings import CLIENT
 
 from PIL import Image
 from sahi.slicing import slice_image

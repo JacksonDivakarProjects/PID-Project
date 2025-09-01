@@ -2,7 +2,7 @@ from fastapi import APIRouter, UploadFile, File
 import tempfile
 from fastapi.responses import JSONResponse
 
-from backend.graph_builder.services.graph_create_services import load_components_from_excel,detect_pipes,build_graph_with_kdtree
+from graph_builder.services.graph_create_services import load_components_from_excel,detect_pipes,build_graph_with_kdtree
 
 router = APIRouter(prefix="/grp_creation", tags=["GRP_CREATION"])
 @router.post("/generate-graph")

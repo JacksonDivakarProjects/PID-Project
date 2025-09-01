@@ -1,10 +1,10 @@
 # main.py or app.py
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
-from backend.ocr_process.router.pnid_text_ret import router as ocr_router  
-from backend.ocr_process.router.excel_text_ret import router as excel_text_ret  
-from backend.obj_pred.router.img_predictions import router as img_pred_router
-from backend.graph_builder.router.graph_creator import router as graph_creator_router
+from ocr_process.router.pnid_text_ret import router as ocr_router  
+from ocr_process.router.excel_text_ret import router as excel_text_ret  
+from obj_pred.router.img_predictions import router as img_pred_router
+from graph_builder.router.graph_creator import router as graph_creator_router
 
 app = FastAPI(
     title="OCR Text Extraction API",

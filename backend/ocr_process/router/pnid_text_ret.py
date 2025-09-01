@@ -7,13 +7,13 @@ import tempfile
 from pathlib import Path
 
 
-from backend.ocr_process.services.pnid_img_text_process import (
+from ocr_process.services.pnid_img_text_process import (
     encode_image_to_base64,
     extract_text_from_image,
     get_mime_type
 )
 
-from backend.config.settings import MODEL
+from config.settings import MODEL
 
 
 # Initialize router

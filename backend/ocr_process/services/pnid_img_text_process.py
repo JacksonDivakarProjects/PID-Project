@@ -2,7 +2,7 @@ from fastapi import File, HTTPException
 import base64
 from pathlib import Path
 
-from backend.config.settings import MODEL,client
+from config.settings import MODEL,client
 
 def encode_image_to_base64(image_path: str) -> str:
     """Encode image file to base64 string"""

@@ -12,7 +12,7 @@ import base64
 router = APIRouter(prefix="/excel_ocr", tags=["EXCEL_OCR"])
 
 # Reuse existing functions from your services
-from backend.ocr_process.services.pnid_img_text_process import (
+from ocr_process.services.pnid_img_text_process import (
     encode_image_to_base64,
     extract_text_from_image,
     get_mime_type

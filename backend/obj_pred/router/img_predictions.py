@@ -12,9 +12,9 @@ from fastapi.responses import StreamingResponse, JSONResponse
 
 
 
-from backend.config.settings import *
-from backend.models.base_models import Base64Request, Base64Response
-from backend.obj_pred.services.perform_obj_pred import perform_inference_and_nms
+from config.settings import *
+from models.base_models import Base64Request, Base64Response
+from obj_pred.services.perform_obj_pred import perform_inference_and_nms
 
 router = APIRouter(prefix="/img_pred", tags=["Roboflow P&ID Inference API"])
 
