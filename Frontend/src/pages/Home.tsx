@@ -53,20 +53,7 @@ const Home = () => {
               </div>
 
               {/* Stats */}
-              <div className="flex gap-8 pt-8">
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">99.2%</div>
-                  <div className="text-sm text-muted-foreground">Accuracy</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-secondary">10x</div>
-                  <div className="text-sm text-muted-foreground">Faster</div>
-                </div>
-                <div className="text-center">
-                  <div className="text-3xl font-bold text-primary">500+</div>
-                  <div className="text-sm text-muted-foreground">Projects</div>
-                </div>
-              </div>
+              
             </div>
 
             {/* Right Image */}
@@ -142,9 +129,6 @@ const Home = () => {
           <h2 className="text-3xl font-bold text-primary-foreground mb-4">
             Ready to Digitize Your P&IDs?
           </h2>
-          <p className="text-xl text-primary-foreground/80 mb-8">
-            Join hundreds of engineering teams already using PIDFlow to accelerate their digital transformation.
-          </p>
                 <Button
                   asChild
                   variant="gradient-secondary"

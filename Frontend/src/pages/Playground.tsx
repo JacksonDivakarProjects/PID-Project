@@ -1,13 +1,15 @@
-// pages/pid-playground.js
-import React, { useState, useRef, useEffect, useCallback } from 'react';
-import { Stage, Layer, Image, Text, Transformer, Group } from 'react-konva';
+/* eslint-disable @typescript-eslint/no-explicit-any */
+import React, { useState, useRef, useEffect } from 'react';
+import { Stage, Layer, Image, Text, Transformer, Group, Line } from 'react-konva';
 import * as XLSX from 'xlsx';
 import Konva from 'konva';
-// --- Helper Icons (unchanged) ---
-const MoveIcon = () => (
-  <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
-    <path d="M5 9l-3 3 3 3M9 5l3-3 3 3M15 19l-3 3-3-3M19 9l3 3-3 3M2 12h20M12 2v20"/>
-  </svg>
+import { useTheme } from 'next-themes';
+
+// --- Helper Icons ---
+const ConnectIcon = () => (
+    <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
+        <circle cx="6" cy="18" r="3" /><circle cx="18" cy="6" r="3" /><line x1="8" y1="16" x2="16" y2="8" />
+    </svg>
 );
 const ZoomInIcon = () => (
   <svg xmlns="http://www.w3.org/2000/svg" width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2" strokeLinecap="round" strokeLinejoin="round">
@@ -39,12 +41,47 @@ const UploadIcon = () => (
     <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4"></path><polyline points="17 8 12 3 7 8"></polyline><line x1="12" y1="3" x2="12" y2="15"></line>
   </svg>
 );
+const UndoIcon = () => (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M3 7v6h6"></path>
+      <path d="M21 17a9 9 0 0 0-9-9a9 9 0 0 0-6 2.3L3 13"></path>
+    </svg>
+);
+const RedoIcon = () => (
+    <svg
+      xmlns="http://www.w3.org/2000/svg"
+      width="20"
+      height="20"
+      viewBox="0 0 24 24"
+      fill="none"
+      stroke="currentColor"
+      strokeWidth="2"
+      strokeLinecap="round"
+      strokeLinejoin="round"
+    >
+      <path d="M21 7v6h-6"></path>
+      <path d="M3 17a9 9 0 0 1 9-9a9 9 0 0 1 6 2.3l3 2.7"></path>
+    </svg>
+);
+
+
 // --- Component Types ---
 const COMPONENT_TYPE_IMAGE = 'image';
 const COMPONENT_TYPE_TEXT = 'text';
+
 // --- Type Definitions ---
 interface ComponentBase {
-  id: number;
+  id: string;
   type: string;
   x: number;
   y: number;
@@ -65,69 +102,92 @@ interface TextComponent extends ComponentBase {
   fontSize: number;
 }
 type CanvasComponent = ImageComponent | TextComponent;
-interface XLSComponentData {
-  class_number: number;
-  x: number;
-  y: number;
-  width: number;
-  height: number;
+
+interface Connection {
+    id: string;
+    from: string;
+    to: string;
 }
+
+type HistoryState = {
+    components: CanvasComponent[];
+    connections: Connection[];
+};
+
 // --- Main Playground Component ---
 export default function PIDPlayground() {
   // --- STATE MANAGEMENT ---
   const [components, setComponents] = useState<CanvasComponent[]>([]);
+  const [connections, setConnections] = useState<Connection[]>([]);
   const [zoomLevel, setZoomLevel] = useState(1);
-  const [selectedId, setSelectedId] = useState<number | null>(null);
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [selectedEdgeId, setSelectedEdgeId] = useState<string | null>(null);
   const [isEditingText, setIsEditingText] = useState(false);
   const [editingText, setEditingText] = useState('');
-  const [editingId, setEditingId] = useState<number | null>(null);
+  const [editingId, setEditingId] = useState<string | null>(null);
   const [editingPosition, setEditingPosition] = useState({ x: 0, y: 0 });
   const [stageSize, setStageSize] = useState({ width: 800, height: 600 });
   const [images, setImages] = useState<Record<string, HTMLImageElement>>({});
+  const [isConnecting, setIsConnecting] = useState(false);
+  const [startComponent, setStartComponent] = useState<string | null>(null);
+  const [mousePosition, setMousePosition] = useState({ x: 0, y: 0 });
   
+  const [history, setHistory] = useState<HistoryState[]>([{ components: [], connections: [] }]);
+  const [historyIndex, setHistoryIndex] = useState(0);
+
+  const { theme } = useTheme();
+
   // --- REFS ---
   const stageRef = useRef<Konva.Stage>(null);
   const transformerRef = useRef<Konva.Transformer>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
   const containerRef = useRef<HTMLDivElement>(null);
   
-  // --- MOCK DATA ---
-  // Updated to use actual class images from the class_images folder
   const componentImages = Array.from({ length: 32 }, (_, i) => ({
     classNumber: i + 1,
-    url: `/class_images/${i + 1}.jpg`, // Updated path to actual images
+    url: `/Class_Images/${i + 1}.jpg`,
   }));
+  
+  // --- HISTORY MANAGEMENT ---
+  const pushToHistory = (newComponents: CanvasComponent[], newConnections: Connection[]) => {
+    const currentState = { components: newComponents, connections: newConnections };
+    const newHistory = history.slice(0, historyIndex + 1);
+    setHistory([...newHistory, currentState]);
+    setHistoryIndex(newHistory.length);
+  };
+
+  const handleUndo = () => {
+    if (historyIndex > 0) {
+      const newIndex = historyIndex - 1;
+      const prevState = history[newIndex];
+      setComponents(prevState.components);
+      setConnections(prevState.connections);
+      setHistoryIndex(newIndex);
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+    }
+  };
+
+  const handleRedo = () => {
+    if (historyIndex < history.length - 1) {
+      const newIndex = historyIndex + 1;
+      const nextState = history[newIndex];
+      setComponents(nextState.components);
+      setConnections(nextState.connections);
+      setHistoryIndex(newIndex);
+      setSelectedId(null);
+      setSelectedEdgeId(null);
+    }
+  };
   
   // --- INITIALIZATION ---
   useEffect(() => {
-    // Load initial mock data
-    const initialComponentData: XLSComponentData[] = [
-      { class_number: 1, x: 100, y: 150, width: 80, height: 80 },
-      { class_number: 5, x: 300, y: 250, width: 100, height: 60 },
-      { class_number: 12, x: 500, y: 100, width: 70, height: 120 },
-      { class_number: 28, x: 450, y: 400, width: 90, height: 90 },
-    ];
-    
-    const initialItems: CanvasComponent[] = initialComponentData.map((item, index) => ({
-      id: index + 1,
-      type: COMPONENT_TYPE_IMAGE,
-      classNumber: item.class_number,
-      x: item.x,
-      y: item.y,
-      width: item.width,
-      height: item.height,
-      imageUrl: componentImages.find(img => img.classNumber === item.class_number)?.url || '',
-    }));
-    
-    setComponents(initialItems);
-    
-    // Set stage size based on container
     const updateStageSize = () => {
       if (containerRef.current) {
         const { width, height } = containerRef.current.getBoundingClientRect();
         setStageSize({
-          width: width - 256, // Subtract sidebar width
-          height: height - 64, // Subtract toolbar height
+          width: width - 256,
+          height: height - 64,
         });
       }
     };
@@ -135,12 +195,30 @@ export default function PIDPlayground() {
     updateStageSize();
     window.addEventListener('resize', updateStageSize);
     
+    const handleKeyDown = (e: KeyboardEvent) => {
+        if (e.key === 'Escape') {
+            setIsConnecting(false);
+            setStartComponent(null);
+            setSelectedId(null);
+            setSelectedEdgeId(null);
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'z') {
+            e.preventDefault();
+            handleUndo();
+        }
+        if ((e.ctrlKey || e.metaKey) && e.key === 'y') {
+            e.preventDefault();
+            handleRedo();
+        }
+    };
+    window.addEventListener('keydown', handleKeyDown);
+
     return () => {
       window.removeEventListener('resize', updateStageSize);
+      window.removeEventListener('keydown', handleKeyDown);
     };
-  }, []);
-  // FIX: Centralized image loader
-  // This effect runs whenever `components` changes and loads new images.
+  }, [historyIndex, history]);
+
   useEffect(() => {
     const newImagesToLoad = components.filter(
       (comp): comp is ImageComponent => comp.type === COMPONENT_TYPE_IMAGE && !!comp.imageUrl && !images[comp.imageUrl]
@@ -162,11 +240,38 @@ export default function PIDPlayground() {
   const handleStageClick = (e: Konva.KonvaEventObject<MouseEvent>) => {
     if (e.target === e.target.getStage()) {
       setSelectedId(null);
+      setSelectedEdgeId(null);
       setIsEditingText(false);
+      setIsConnecting(false);
+      setStartComponent(null);
     }
   };
+
+  const handleComponentClick = (id: string) => {
+    if (isConnecting) {
+        if (startComponent === null) {
+            setStartComponent(id);
+        } else if (startComponent !== id) {
+            const newConnection = { id: `${startComponent}-${id}-${Date.now()}`, from: startComponent, to: id };
+            const newConnections = [...connections, newConnection];
+            setConnections(newConnections);
+            pushToHistory(components, newConnections);
+            setStartComponent(null);
+            setIsConnecting(false);
+        }
+    } else {
+        setSelectedId(id);
+        setSelectedEdgeId(null);
+    }
+  };
+
+  const handleEdgeClick = (id: string) => {
+      setSelectedId(null);
+      setSelectedEdgeId(id);
+      setIsConnecting(false);
+  };
   
-  const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>, id: number) => {
+  const handleDragMove = (e: Konva.KonvaEventObject<DragEvent>, id: string) => {
     const node = e.target as Konva.Node;
     setComponents(prevComponents =>
       prevComponents.map(comp =>
@@ -176,47 +281,65 @@ export default function PIDPlayground() {
       )
     );
   };
-  
-  const handleTransformEnd = (e: Konva.KonvaEventObject<Event>, id: number) => {
+
+  const handleDragEnd = (e: Konva.KonvaEventObject<DragEvent>, id: string) => {
     const node = e.target as Konva.Node;
-    
-    // Get the new dimensions directly from the Konva node.
-    const newWidth = node.width() * node.scaleX();
-    const newHeight = node.height() * node.scaleY();
-    const newX = node.x();
-    const newY = node.y();
-    const newRotation = node.rotation();
-    
-    // Update the component in state with the new values.
-    setComponents(prevComponents =>
-      prevComponents.map(comp =>
-        comp.id === id
-          ? {
-              ...comp,
-              x: newX,
-              y: newY,
-              width: newWidth,
-              height: newHeight,
-              rotation: newRotation,
-              scaleX: 1,
-              scaleY: 1,
-            }
-          : comp
-      )
+    const newComponents = components.map(comp =>
+        comp.id === id ? { ...comp, x: node.x(), y: node.y() } : comp
     );
-    
-    node.scaleX(1);
-    node.scaleY(1);
-  };  
-  const handleTextDblClick = (e: Konva.KonvaEventObject<MouseEvent>, id: number, text: string) => {
+    setComponents(newComponents);
+    pushToHistory(newComponents, connections);
+  };
+  
+  // MODIFIED: This function now correctly resizes text font size.
+  const handleTransformEnd = (e: Konva.KonvaEventObject<Event>, id: string) => {
+    const node = e.target as Konva.Node;
+
+    const newComponents = components.map(comp => {
+      if (comp.id === id) {
+        const scaleX = node.scaleX();
+        const scaleY = node.scaleY();
+
+        // important: reset scale for next transformations
+        node.scaleX(1);
+        node.scaleY(1);
+
+        const newProps = {
+          x: node.x(),
+          y: node.y(),
+          rotation: node.rotation(),
+          width: Math.max(20, node.width() * scaleX), // enforce a minimum width
+          height: Math.max(10, node.height() * scaleY), // enforce a minimum height
+        };
+        
+        // If it's a text component, we also update the font size
+        if (comp.type === COMPONENT_TYPE_TEXT) {
+          return {
+            ...comp,
+            ...newProps,
+            fontSize: Math.round(comp.fontSize * scaleY),
+          };
+        }
+        
+        // For other components (like images), just update the props
+        return {
+          ...comp,
+          ...newProps,
+        };
+      }
+      return comp;
+    });
+
+    setComponents(newComponents);
+    pushToHistory(newComponents, connections);
+  };
+  
+  const handleTextDblClick = (e: Konva.KonvaEventObject<Event>, id: string, text: string) => {
     const textNode = e.target as Konva.Text;
     setIsEditingText(true);
     setEditingText(text);
     setEditingId(id);
-    setEditingPosition({
-      x: textNode.x(),
-      y: textNode.y(),
-    });
+    setEditingPosition({ x: textNode.getAbsolutePosition().x, y: textNode.getAbsolutePosition().y });
   };
   
   const handleTextChange = (e: React.ChangeEvent<HTMLInputElement>) => {
@@ -225,25 +348,23 @@ export default function PIDPlayground() {
   
   const handleTextBlur = () => {
     if (editingId !== null) {
-      setComponents(prevComponents =>
-        prevComponents.map(comp =>
+      const newComponents = components.map(comp =>
           comp.id === editingId && comp.type === COMPONENT_TYPE_TEXT
             ? { ...comp, text: editingText }
             : comp
-        )
       );
+      setComponents(newComponents);
+      pushToHistory(newComponents, connections);
     }
     setIsEditingText(false);
     setEditingId(null);
   };
   
-  // Zoom controls using Konva's built-in methods
   const handleZoomIn = () => {
     const stage = stageRef.current;
     if (stage) {
       const newScale = Math.min(stage.scaleX() * 1.1, 2);
       stage.scale({ x: newScale, y: newScale });
-      stage.batchDraw();
       setZoomLevel(newScale);
     }
   };
@@ -253,12 +374,10 @@ export default function PIDPlayground() {
     if (stage) {
       const newScale = Math.max(stage.scaleX() / 1.1, 0.5);
       stage.scale({ x: newScale, y: newScale });
-      stage.batchDraw();
       setZoomLevel(newScale);
     }
   };
   
-  // Handle wheel event for zooming using Konva's methods
   const handleWheel = (e: Konva.KonvaEventObject<WheelEvent>) => {
     e.evt.preventDefault();
     const stage = stageRef.current;
@@ -274,21 +393,30 @@ export default function PIDPlayground() {
     };
     
     const newScale = e.evt.deltaY < 0 ? oldScale * 1.05 : oldScale / 1.05;
-    
     stage.scale({ x: newScale, y: newScale });
     
     const newPos = {
       x: pointer.x - mousePointTo.x * newScale,
       y: pointer.y - mousePointTo.y * newScale,
     };
-    
     stage.position(newPos);
-    stage.batchDraw();
     setZoomLevel(newScale);
+  };
+
+  const handleMouseMove = (e: Konva.KonvaEventObject<MouseEvent>) => {
+      if (isConnecting && startComponent !== null) {
+          const stage = e.target.getStage();
+          if (stage) {
+              const pos = stage.getRelativePointerPosition();
+              if (pos) {
+                  setMousePosition(pos);
+              }
+          }
+      }
   };
   
   const addNewComponent = (classNumber: number, imageUrl: string) => {
-    const newId = Date.now();
+    const newId = `comp-${Date.now()}`;
     const newComponent: ImageComponent = {
       id: newId,
       type: COMPONENT_TYPE_IMAGE,
@@ -299,12 +427,14 @@ export default function PIDPlayground() {
       width: 80,
       height: 80,
     };
-    setComponents(prev => [...prev, newComponent]);
+    const newComponents = [...components, newComponent];
+    setComponents(newComponents);
+    pushToHistory(newComponents, connections);
     setSelectedId(newId);
   };
   
   const addText = () => {
-    const newId = Date.now();
+    const newId = `text-${Date.now()}`;
     const newText: TextComponent = {
       id: newId,
       type: COMPONENT_TYPE_TEXT,
@@ -315,73 +445,97 @@ export default function PIDPlayground() {
       text: 'Editable Text',
       fontSize: 16,
     };
-    setComponents(prev => [...prev, newText]);
+    const newComponents = [...components, newText];
+    setComponents(newComponents);
+    pushToHistory(newComponents, connections);
     setSelectedId(newId);
   };
   
-  const deleteSelectedComponent = () => {
-    if (selectedId === null) return;
-    setComponents(prev => prev.filter(c => c.id !== selectedId));
-    setSelectedId(null);
+  const handleDelete = () => {
+    let newComponents = [...components];
+    let newConnections = [...connections];
+
+    if (selectedId) {
+      newComponents = components.filter(c => c.id !== selectedId);
+      newConnections = connections.filter(conn => conn.from !== selectedId && conn.to !== selectedId);
+      setSelectedId(null);
+    }
+    if (selectedEdgeId) {
+        newConnections = connections.filter(conn => conn.id !== selectedEdgeId);
+        setSelectedEdgeId(null);
+    }
+
+    setComponents(newComponents);
+    setConnections(newConnections);
+    pushToHistory(newComponents, newConnections);
+  };
+
+  const findClosestComponent = (point: number[], componentsToSearch: CanvasComponent[]) => {
+      let closestComponent: CanvasComponent | null = null;
+      let minDistance = Infinity;
+      componentsToSearch.forEach(component => {
+          const componentCenter = { x: component.x + component.width / 2, y: component.y + component.height / 2 };
+          const distance = Math.sqrt(Math.pow(point[0] - componentCenter.x, 2) + Math.pow(point[1] - componentCenter.y, 2));
+          if (distance < minDistance) {
+              minDistance = distance;
+              closestComponent = component;
+          }
+      });
+      return closestComponent;
   };
   
-  // FIX: This function now creates text components from the Excel data.
   const handleFileUpload = (e: React.ChangeEvent<HTMLInputElement>) => {
-          const file = e.target.files?.[0];
-          if (!file) return;
-          
-          const reader = new FileReader();
-          reader.onload = (event) => {
-             try {
-                const data = new Uint8Array(event.target?.result as ArrayBuffer);
-                const workbook = XLSX.read(data, { type: 'array' });
-                const firstSheetName = workbook.SheetNames[0];
-                const worksheet = workbook.Sheets[firstSheetName];
-                const jsonData = XLSX.utils.sheet_to_json(worksheet) as XLSComponentData[];
-                
-                if (jsonData.length === 0 || !('class_number' in jsonData[0])) {
-                   alert('Error: Could not parse components. Please ensure your Excel file has the exact headers: class_number, x, y, width, height.');
-                   return;
-                }
-                
-                const newComponents: CanvasComponent[] = jsonData.map((item, index) => {
-                   
-              // FIX: Convert the class_number from the Excel data to a number
-              const excelClassNumber = Number(item.class_number);
-                   const imageUrl = componentImages.find(img => img.classNumber === excelClassNumber)?.url || '';
-                   
-                   console.log(`Excel class_number: ${item.class_number} (Type: ${typeof item.class_number}), imageUrl:`, imageUrl);
-                   
-                   return {
-                      id: Date.now() + index,
-                      type: COMPONENT_TYPE_IMAGE,
-                      classNumber: excelClassNumber,
-                      x: item.x ,
-                      y: item.y ,
-                      width: item.width,
-                      height: item.height,
-                      imageUrl,
-                   };
-                });
-                
-                setComponents(newComponents);
-             } catch (error) {
-                console.error('Error parsing XLS file:', error);
-                alert('Error parsing XLS file. Please check the file format.');
-             } finally {
-                if (fileInputRef.current) {
-                   fileInputRef.current.value = '';
-                }
-             }
-          };
-          reader.readAsArrayBuffer(file);
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    const reader = new FileReader();
+    reader.onload = (event) => {
+      try {
+        const fileContent = event.target?.result as string;
+        const data = JSON.parse(fileContent);
+
+        if (!data.components || !data.lines || !data.lines.segments) {
+          alert('Error: Invalid JSON format. Missing "components" or "lines.segments" array.');
+          return;
+        }
+
+        const newComponents: CanvasComponent[] = data.components.map((comp: any, index: number) => {
+            const classNumber = parseInt(comp.class, 10);
+            return {
+                id: `comp-${index}-${Date.now()}`, type: COMPONENT_TYPE_IMAGE, classNumber,
+                x: comp.x - comp.width / 2, y: comp.y - comp.height / 2, width: comp.width, height: comp.height,
+                imageUrl: componentImages.find(img => img.classNumber === classNumber)?.url || '',
+            };
+        });
+
+        const newConnections: Connection[] = data.lines.segments.map((segment: any[], index: number) => {
+            const fromComponent = findClosestComponent(segment[0], newComponents);
+            const toComponent = findClosestComponent(segment[segment.length - 1], newComponents);
+            if (fromComponent && toComponent && fromComponent.id !== toComponent.id) {
+                return { id: `edge-${index}-${Date.now()}`, from: fromComponent.id, to: toComponent.id };
+            }
+            return null;
+        }).filter((conn: Connection | null): conn is Connection => conn !== null);
+
+        setComponents(newComponents);
+        setConnections(newConnections);
+        pushToHistory(newComponents, newConnections);
+
+      } catch (error) {
+        console.error('Error parsing JSON file:', error);
+        alert('Error parsing JSON file. Please check the file format.');
+      } finally {
+        if (fileInputRef.current) fileInputRef.current.value = '';
+      }
     };
+    reader.readAsText(file);
+  };
+
   const exportToJSON = () => {
-    const dataStr = JSON.stringify(components, null, 2);
+    const exportData = { components, connections };
+    const dataStr = JSON.stringify(exportData, null, 2);
     const dataUri = 'data:application/json;charset=utf-8,'+ encodeURIComponent(dataStr);
-    
     const exportFileDefaultName = 'pid-layout.json';
-    
     const linkElement = document.createElement('a');
     linkElement.setAttribute('href', dataUri);
     linkElement.setAttribute('download', exportFileDefaultName);
@@ -390,31 +544,18 @@ export default function PIDPlayground() {
   
   const exportToXLS = () => {
     const exportData = components
-      .filter(comp => comp.type === COMPONENT_TYPE_IMAGE)
-      .map(comp => ({
-        id: comp.id,
-        class_number: (comp as ImageComponent).classNumber,
-        x: comp.x,
-        y: comp.y,
-        width: comp.width,
-        height: comp.height,
-      }));
-    
+      .filter((comp): comp is ImageComponent => comp.type === COMPONENT_TYPE_IMAGE)
+      .map(comp => ({ id: comp.id, class_number: comp.classNumber, x: comp.x, y: comp.y, width: comp.width, height: comp.height }));
     const worksheet = XLSX.utils.json_to_sheet(exportData);
     const workbook = XLSX.utils.book_new();
     XLSX.utils.book_append_sheet(workbook, worksheet, 'Components');
-    
     XLSX.writeFile(workbook, 'pid-layout.xlsx');
   };
   
-  // --- EFFECTS ---
   useEffect(() => {
     if (selectedId !== null && transformerRef.current) {
       const selectedNode = stageRef.current?.findOne(`#${selectedId}`);
       if (selectedNode) {
-        selectedNode.scale({ x: 1, y: 1 });
-        selectedNode.width(selectedNode.width());
-        selectedNode.height(selectedNode.height());
         transformerRef.current.nodes([selectedNode]);
         transformerRef.current.getLayer()?.batchDraw();
       }
@@ -422,170 +563,110 @@ export default function PIDPlayground() {
       transformerRef.current.nodes([]);
     }
   }, [selectedId]);
-  // This effect is now obsolete as we are rendering text. You can remove it for now.
-  // useEffect(() => {
-  //   const newImagesToLoad = components.filter(
-  //     (comp): comp is ImageComponent => comp.type === COMPONENT_TYPE_IMAGE && !!comp.imageUrl && !images[comp.imageUrl]
-  //   );
-  //   newImagesToLoad.forEach(component => {
-  //     const img = new window.Image();
-  //     img.src = component.imageUrl;
-  //     img.onload = () => {
-  //       setImages(prev => ({ ...prev, [component.imageUrl]: img }));
-  //     };
-  //     img.onerror = () => {
-  //       console.error(`Failed to load image: ${component.imageUrl}`);
-  //     };
-  //   });
-  // }, [components, images]);
-  
-  // --- RENDER LOGIC ---
+
+  const getComponentCenter = (componentId: string) => {
+    const component = components.find(c => c.id === componentId);
+    if (!component) return { x: 0, y: 0 };
+    return { x: component.x + component.width / 2, y: component.y + component.height / 2 };
+  };
+
+  const isDarkMode = theme === 'dark';
+
   return (
-    <div className="flex flex-col h-screen bg-gray-100 font-sans">
-      {/* --- Toolbar --- */}
-      <header className="bg-white border-b border-gray-200 p-3 flex items-center justify-between z-10 shadow-sm">
+    <div className={`flex flex-col h-screen font-sans ${isDarkMode ? 'dark bg-gray-900 text-gray-100' : 'bg-gray-100 text-gray-900'}`}>
+      <header className={`p-3 flex items-center justify-between z-10 shadow-sm ${isDarkMode ? 'bg-gray-800 border-b border-gray-700' : 'bg-white border-b border-gray-200'}`}>
         <div className="flex items-center space-x-2">
-          <button 
-            onClick={handleZoomIn} 
-            className="p-2 rounded-md hover:bg-gray-200 flex items-center" 
-            title="Zoom In"
-          >
-            <ZoomInIcon />
-          </button>
-          <span className="text-sm font-medium text-gray-600 w-12 text-center">{(zoomLevel * 100).toFixed(0)}%</span>
-          <button 
-            onClick={handleZoomOut} 
-            className="p-2 rounded-md hover:bg-gray-200 flex items-center" 
-            title="Zoom Out"
-          >
-            <ZoomOutIcon />
-          </button>
+          <button onClick={handleZoomIn} className={`p-2 rounded-md flex items-center ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Zoom In"><ZoomInIcon /></button>
+          <span className={`text-sm font-medium w-12 text-center ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{(zoomLevel * 100).toFixed(0)}%</span>
+          <button onClick={handleZoomOut} className={`p-2 rounded-md flex items-center ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Zoom Out"><ZoomOutIcon /></button>
+          <div className={`border-l h-6 mx-1 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
+          <button onClick={handleUndo} disabled={historyIndex === 0} className={`p-2 rounded-md flex items-center disabled:opacity-50 disabled:cursor-not-allowed ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Undo (Ctrl+Z)"><UndoIcon /></button>
+          <button onClick={handleRedo} disabled={historyIndex >= history.length - 1} className={`p-2 rounded-md flex items-center disabled:opacity-50 disabled:cursor-not-allowed ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Redo (Ctrl+Y)"><RedoIcon /></button>
         </div>
         
         <div className="flex items-center space-x-2">
-          <span className="text-sm font-bold text-gray-700">Components: {components.length}</span>
-          <div className="border-l border-gray-300 h-6 mx-1"></div>
-          
+          <span className={`text-sm font-bold ${isDarkMode ? 'text-gray-300' : 'text-gray-700'}`}>Components: {components.length}</span>
+          <div className={`border-l h-6 mx-1 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
           <button 
-            onClick={addText} 
-            className="p-2 rounded-md hover:bg-gray-200 flex items-center space-x-1" 
-            title="Add Text"
+            onClick={() => { setIsConnecting(prev => !prev); setStartComponent(null); setSelectedId(null); }}
+            className={`p-2 rounded-md flex items-center space-x-1 ${isConnecting ? (isDarkMode ? 'bg-blue-900 text-blue-300' : 'bg-blue-100 text-blue-600') : (isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200')}`} 
+            title="Connect Components"
           >
-            <TextIcon />
-            <span className="text-sm font-medium">Add Text</span>
+              <ConnectIcon />
+              <span className="text-sm font-medium">Connect</span>
           </button>
-          
-          {selectedId && (
-            <button 
-              onClick={deleteSelectedComponent} 
-              className="p-2 rounded-md hover:bg-red-100 text-red-600 flex items-center space-x-1" 
-              title="Delete Selected"
-            >
-              <TrashIcon />
-              <span className="text-sm font-medium">Delete</span>
-            </button>
+          <button onClick={addText} className={`p-2 rounded-md flex items-center space-x-1 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Add Text"><TextIcon /><span className="text-sm font-medium">Add Text</span></button>
+          {(selectedId || selectedEdgeId) && (
+            <button onClick={handleDelete} className={`p-2 rounded-md flex items-center space-x-1 ${isDarkMode ? 'hover:bg-red-900 text-red-400' : 'hover:bg-red-100 text-red-600'}`} title="Delete Selected"><TrashIcon /><span className="text-sm font-medium">Delete</span></button>
           )}
-          
-          <div className="border-l border-gray-300 h-6 mx-1"></div>
-          
-          <button 
-            onClick={() => fileInputRef.current?.click()} 
-            className="p-2 rounded-md hover:bg-gray-200 flex items-center space-x-1" 
-            title="Upload XLS"
-          >
-            <UploadIcon />
-            <span className="text-sm font-medium">Upload</span>
-          </button>
-          <input 
-            type="file" 
-            ref={fileInputRef} 
-            className="hidden" 
-            accept=".xlsx,.xls" 
-            onChange={handleFileUpload} 
-          />
-          
+          <div className={`border-l h-6 mx-1 ${isDarkMode ? 'border-gray-600' : 'border-gray-300'}`}></div>
+          <button onClick={() => fileInputRef.current?.click()} className={`p-2 rounded-md flex items-center space-x-1 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Upload JSON/XLS"><UploadIcon /><span className="text-sm font-medium">Upload</span></button>
+          <input type="file" ref={fileInputRef} className="hidden" accept=".json" onChange={handleFileUpload} />
           <div className="relative group">
-            <button className="p-2 rounded-md hover:bg-gray-200 flex items-center space-x-1" title="Export">
-              <ExportIcon />
-              <span className="text-sm font-medium">Export</span>
-            </button>
-            <div className="absolute right-0 mt-1 w-48 bg-white rounded-md shadow-lg py-1 z-20 hidden group-hover:block">
-              <button 
-                onClick={exportToJSON} 
-                className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
-              >
-                Export as JSON
-              </button>
-              <button 
-                onClick={exportToXLS} 
-                className="block px-4 py-2 text-sm text-gray-700 hover:bg-gray-100 w-full text-left"
-              >
-                Export as XLS
-              </button>
+            <button className={`p-2 rounded-md flex items-center space-x-1 ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Export"><ExportIcon /><span className="text-sm font-medium">Export</span></button>
+            <div className={`absolute right-0 mt-1 w-48 rounded-md shadow-lg py-1 z-20 hidden group-hover:block ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+              <button onClick={exportToJSON} className={`block px-4 py-2 text-sm w-full text-left ${isDarkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>Export as JSON</button>
+              <button onClick={exportToXLS} className={`block px-4 py-2 text-sm w-full text-left ${isDarkMode ? 'text-gray-300 hover:bg-gray-700' : 'text-gray-700 hover:bg-gray-100'}`}>Export as XLS</button>
             </div>
           </div>
         </div>
       </header>
       
       <div className="flex flex-1 overflow-hidden">
-        {/* --- Component Palette Sidebar --- */}
-        <aside className="w-64 bg-white border-r border-gray-200 p-4 flex flex-col overflow-y-auto">
-          <h2 className="text-lg font-bold text-gray-700 mb-4">Components</h2>
+        <aside className={`w-64 p-4 flex flex-col overflow-y-auto ${isDarkMode ? 'bg-gray-800 border-r border-gray-700' : 'bg-white border-r border-gray-200'}`}>
+          <h2 className={`text-lg font-bold mb-4 ${isDarkMode ? 'text-gray-200' : 'text-gray-700'}`}>Components</h2>
           <div className="grid grid-cols-3 gap-3">
             {componentImages.map(img => (
-              <button
-                key={img.classNumber}
-                onClick={() => addNewComponent(img.classNumber, img.url)}
-                className="border border-gray-300 rounded-lg p-1 hover:bg-gray-100 hover:border-blue-500 focus:outline-none focus:ring-2 focus:ring-blue-500 transition-all duration-200"
-                title={`Add Component C${img.classNumber}`}
-              >
-                <img 
-                  src={img.url} 
-                  alt={`Component C${img.classNumber}`} 
-                  className="w-full h-auto object-contain"
-                  onError={(e) => {
-                    // Fallback to placeholder if image fails to load
-                    const target = e.target as HTMLImageElement;
-                    target.src = `https://placehold.co/100x100/E2E8F0/4A5568?text=C${img.classNumber}`;
-                  }}
-                />
+              <button key={img.classNumber} onClick={() => addNewComponent(img.classNumber, img.url)} className={`rounded-lg p-1 transition-all duration-200 ${isDarkMode ? 'border border-gray-600 hover:bg-gray-700 hover:border-blue-400' : 'border border-gray-300 hover:bg-gray-100 hover:border-blue-500'}`} title={`Add Component C${img.classNumber}`}>
+                <img src={img.url} alt={`Component C${img.classNumber}`} className={`w-full h-auto object-contain ${isDarkMode ? 'bg-gray-300' : ''}`} onError={(e) => { const target = e.target as HTMLImageElement; target.src = `https://placehold.co/100x100/E2E8F0/4A5568?text=C${img.classNumber}`; }} />
               </button>
             ))}
           </div>
         </aside>
         
-        {/* --- Canvas Area --- */}
-        <main className="flex-1 bg-gray-50 overflow-auto relative" ref={containerRef}>
+        <main className={`flex-1 overflow-auto relative ${isConnecting ? 'cursor-crosshair' : ''} ${isDarkMode ? 'bg-gray-900' : 'bg-gray-50'}`} ref={containerRef}>
           <Stage
             width={stageSize.width}
             height={stageSize.height}
             ref={stageRef}
             onWheel={handleWheel}
             onClick={handleStageClick}
+            onMouseMove={handleMouseMove}
             draggable
           >
             <Layer>
-              {/* FIX: Updated rendering logic to handle both image and text components */}
+              {connections.map(conn => {
+                  const fromCenter = getComponentCenter(conn.from);
+                  const toCenter = getComponentCenter(conn.to);
+                  return (
+                      <Line
+                          key={conn.id}
+                          points={[fromCenter.x, fromCenter.y, toCenter.x, toCenter.y]}
+                          stroke={selectedEdgeId === conn.id ? "red" : (isDarkMode ? "white" : "black")}
+                          strokeWidth={selectedEdgeId === conn.id ? 4 : 2}
+                          onClick={() => handleEdgeClick(conn.id)}
+                          onTap={() => handleEdgeClick(conn.id)}
+                          hitStrokeWidth={10}
+                      />
+                  );
+              })}
+
               {components.map(component => {
                 if (component.type === COMPONENT_TYPE_IMAGE) {
                   return (
                     <Group
-                      key={component.id}
-                      id={component.id.toString()}
-                      x={component.x}
-                      y={component.y}
-                      width={component.width}
-                      height={component.height}
+                      key={component.id} id={String(component.id)}
+                      x={component.x} y={component.y}
+                      width={component.width} height={component.height}
+                      rotation={component.rotation}
                       draggable
+                      onDragMove={(e) => handleDragMove(e, component.id)}
                       onDragEnd={(e) => handleDragEnd(e, component.id)}
                       onTransformEnd={(e) => handleTransformEnd(e, component.id)}
-                      onClick={() => setSelectedId(component.id)}
+                      onClick={() => handleComponentClick(component.id)}
+                      onTap={() => handleComponentClick(component.id)}
                     >
-                      <Image
-                        width={component.width}
-                        height={component.height}
-                        image={images[component.imageUrl]}
-                      />
+                      <Image image={images[component.imageUrl]} width={component.width} height={component.height}/>
                     </Group>
                   );
                 }
@@ -593,78 +674,66 @@ export default function PIDPlayground() {
                 if (component.type === COMPONENT_TYPE_TEXT) {
                   return (
                     <Text
-                      key={component.id}
-                      id={component.id.toString()}
-                      x={component.x}
-                      y={component.y}
-                      text={component.text}
-                      fontSize={component.fontSize}
+                      key={component.id} id={String(component.id)}
+                      x={component.x} y={component.y}
+                      text={component.text} fontSize={component.fontSize}
+                      fill={isDarkMode ? 'white' : 'black'}
                       draggable
+                      width={component.width} // Use width for wrapping
+                      onDragMove={(e) => handleDragMove(e, component.id)}
                       onDragEnd={(e) => handleDragEnd(e, component.id)}
                       onTransformEnd={(e) => handleTransformEnd(e, component.id)}
-                      onClick={() => setSelectedId(component.id)}
+                      onClick={() => handleComponentClick(component.id)}
+                      onTap={() => handleComponentClick(component.id)}
                       onDblClick={(e) => handleTextDblClick(e, component.id, component.text)}
+                      onDblTap={(e) => handleTextDblClick(e, component.id, component.text)}
                     />
                   );
                 }
-                
                 return null;
               })}
+
+              {isConnecting && startComponent && (
+                  <Line
+                      points={[
+                          getComponentCenter(startComponent).x, getComponentCenter(startComponent).y,
+                          mousePosition.x, mousePosition.y
+                      ]}
+                      stroke="dodgerblue" strokeWidth={2} dash={[4, 4]}
+                  />
+              )}
               
               <Transformer
                 ref={transformerRef}
                 enabledAnchors={['top-left', 'top-right', 'bottom-left', 'bottom-right']}
                 boundBoxFunc={(oldBox, newBox) => {
-                  // Limit resize
-                  if (newBox.width < 20 || newBox.height < 20) {
-                    return oldBox;
-                  }
+                  if (newBox.width < 20 || newBox.height < 20) return oldBox;
                   return newBox;
                 }}
               />
             </Layer>
           </Stage>
           
-          {/* Text Editor Overlay */}
           {isEditingText && (
-            <div
-              className="absolute bg-white border border-blue-500 rounded shadow-lg p-2 z-10"
-              style={{
-                left: editingPosition.x * zoomLevel,
-                top: editingPosition.y * zoomLevel,
-                transform: `scale(${zoomLevel})`,
-                transformOrigin: 'top left',
-              }}
-            >
-              <input
-                type="text"
-                value={editingText}
-                onChange={handleTextChange}
-                onBlur={handleTextBlur}
-                autoFocus
-                className="outline-none border-none bg-transparent"
-                style={{ fontSize: '16px' }}
-              />
-            </div>
+             <div style={{ position: 'absolute', top: editingPosition.y, left: editingPosition.x, }}>
+                <input
+                    type="text" value={editingText}
+                    onChange={handleTextChange} onBlur={handleTextBlur}
+                    autoFocus
+                    style={{
+                        fontSize: `${16 * zoomLevel}px`, border: '1px solid #ccc',
+                        padding: '2px', margin: 0,
+                        background: isDarkMode ? '#374151' : 'white',
+                        color: isDarkMode ? 'white' : 'black'
+                    }}
+                />
+             </div>
           )}
           
-          {/* Zoom Controls */}
-          <div className="absolute bottom-4 right-4 bg-white rounded-lg shadow-md p-2 flex items-center space-x-2">
-            <button 
-              onClick={handleZoomOut} 
-              className="p-1 rounded-md hover:bg-gray-200"
-              title="Zoom Out"
-            >
-              <ZoomOutIcon />
-            </button>
-            <span className="text-sm font-medium text-gray-600 w-12 text-center">{(zoomLevel * 100).toFixed(0)}%</span>
-            <button 
-              onClick={handleZoomIn} 
-              className="p-1 rounded-md hover:bg-gray-200"
-              title="Zoom In"
-            >
-              <ZoomInIcon />
-            </button>
+          <div className={`absolute bottom-4 right-4 rounded-lg shadow-md p-2 flex items-center space-x-2 ${isDarkMode ? 'bg-gray-800' : 'bg-white'}`}>
+            <button onClick={handleZoomOut} className={`p-1 rounded-md ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Zoom Out"><ZoomOutIcon /></button>
+            <span className={`text-sm font-medium w-12 text-center ${isDarkMode ? 'text-gray-300' : 'text-gray-600'}`}>{(zoomLevel * 100).toFixed(0)}%</span>
+            <button onClick={handleZoomIn} className={`p-1 rounded-md ${isDarkMode ? 'hover:bg-gray-700' : 'hover:bg-gray-200'}`} title="Zoom In"><ZoomInIcon /></button>
           </div>
         </main>
       </div>

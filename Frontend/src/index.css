@@ -148,6 +148,26 @@ All colors MUST be HSL.
   .animate-glow {
     animation: glow-pulse 2s ease-in-out infinite;
   }
+
+  /* --- ADDED ANIMATIONS START HERE --- */
+  .animate-fade-in {
+    animation: fadeIn 1s ease-in-out;
+  }
+  
+  .animate-slide-in {
+    animation: slideIn 1s ease-in-out;
+  }
+
+  @keyframes fadeIn {
+    from { opacity: 0; }
+    to { opacity: 1; }
+  }
+
+  @keyframes slideIn {
+    from { transform: translateY(20px); opacity: 0; }
+    to { transform: translateY(0); opacity: 1; }
+  }
+  /* --- ADDED ANIMATIONS END HERE --- */
 }
 
 @layer components {
