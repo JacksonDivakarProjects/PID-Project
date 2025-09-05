@@ -11,5 +11,8 @@ RUN npm install
 # Copy the rest of the source code
 COPY . .
 
+# Expose the port
+EXPOSE 3000
+
 # Use JSON array form for CMD
 CMD ["npm", "run", "dev"]
